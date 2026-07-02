@@ -9,6 +9,15 @@
 import Foundation
 @_implementationOnly import Minizip
 
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(Bionic)
+import Bionic
+import _stdio
+#endif
+
 /// Zip error type
 public enum ZipError: Error {
     /// File not found
@@ -211,9 +220,17 @@ public class Zip {
             }
 
             var writeBytes: UInt64 = 0
-            var filePointer: UnsafeMutablePointer<FILE>?
-            filePointer = fopen(fullPath, "wb")
-            while filePointer != nil {
+            #if canImport(Bionic)
+            guard let filePointer: OpaquePointer = fopen(fullPath, "wb") else {
+                throw ZipError.unzipFail
+            }
+            #else
+            guard let filePointer: UnsafeMutablePointer<FILE> = fopen(fullPath, "wb") else {
+                throw ZipError.unzipFail
+            }
+            #endif
+            defer { fclose(filePointer) }
+            while true {
                 let readBytes = unzReadCurrentFile(zip, &buffer, bufferSize)
                 if readBytes > 0 {
                     guard fwrite(buffer, Int(readBytes), 1, filePointer) == 1 else {
@@ -225,8 +242,6 @@ public class Zip {
                     break
                 }
             }
-
-            if let fp = filePointer { fclose(fp) }
 
             crc_ret = unzCloseCurrentFile(zip)
             if crc_ret == UNZ_CRCERROR {
